@@ -1,0 +1,27 @@
+{
+  "name": "insurance-claim-system",
+  "version": "1.0.0",
+  "description": "保险查勘定损协作全栈应用",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "concurrently \"npm run server\" \"npm run client\"",
+    "server": "nodemon server/index.js",
+    "client": "cd client && npm start",
+    "seed": "node server/seed.js",
+    "test:acceptance": "node tests/acceptance.js",
+    "build": "cd client && npm run build"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "sql.js": "^1.10.3",
+    "multer": "^1.4.5-lts.1",
+    "uuid": "^9.0.1",
+    "dayjs": "^1.11.10"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2",
+    "concurrently": "^8.2.2"
+  }
+}
