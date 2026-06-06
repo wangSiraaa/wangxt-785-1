@@ -2,9 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { 
   Card, Table, Button, Form, Input, Select, Tag, 
-  Typography, message, Space, Modal, Descriptions, Alert
+  Typography, message, Space, Modal, Descriptions, Alert, Upload, Image
 } from 'antd';
-import { PlusOutlined, CameraOutlined, CheckOutlined } from '@ant-design/icons';
+import { PlusOutlined, CameraOutlined, CheckOutlined, UploadOutlined } from '@ant-design/icons';
 import { claimApi } from '../services/api';
 import dayjs from 'dayjs';
 
@@ -36,6 +36,8 @@ function Survey() {
   const [submitLoading, setSubmitLoading] = useState(false);
   const [photoModalVisible, setPhotoModalVisible] = useState(false);
   const [photoForm] = Form.useForm();
+  const [uploading, setUploading] = useState(false);
+  const [fileList, setFileList] = useState([]);
 
   useEffect(() => {
     if (selectedReportId) {
@@ -74,25 +76,37 @@ function Survey() {
     navigate(`/survey/${reportId}`);
   };
 
-  const handleAddPhoto = async (values) => {
+  const handleUploadPhoto = async (values) => {
+    if (fileList.length === 0) {
+      message.error('请选择要上传的照片文件');
+      return;
+    }
+    
+    setUploading(true);
     try {
-      await claimApi.uploadPhoto(selectedReportId, {
-        ...values,
-        upload_by: '查勘员张三',
-        file_path: `/uploads/${Date.now()}_${values.file_name}`
-      });
+      const formData = new FormData();
+      formData.append('photo', fileList[0].originFileObj);
+      formData.append('photo_type', values.photo_type);
+      formData.append('damage_part', values.damage_part);
+      formData.append('description', values.description || '');
+      formData.append('upload_by', '查勘员张三');
+      
+      await claimApi.uploadPhoto(selectedReportId, formData);
       message.success('照片上传成功');
       setPhotoModalVisible(false);
       photoForm.resetFields();
+      setFileList([]);
       loadReportDetail(selectedReportId);
     } catch (error) {
       message.error('照片上传失败: ' + error.message);
+    } finally {
+      setUploading(false);
     }
   };
 
   const handleSubmitSurvey = async () => {
     if (!report || report.photos.length === 0) {
-      message.error('请先上传现场照片');
+      message.error('请先上传现场照片后再提交查勘');
       return;
     }
     setSubmitLoading(true);
@@ -107,11 +121,44 @@ function Survey() {
     }
   };
 
+  const beforeUpload = (file) => {
+    const isImage = file.type.startsWith('image/');
+    if (!isImage) {
+      message.error('只能上传图片文件!');
+      return false;
+    }
+    const isLt10M = file.size / 1024 / 1024 < 10;
+    if (!isLt10M) {
+      message.error('图片大小不能超过10MB!');
+      return false;
+    }
+    setFileList([file]);
+    return false;
+  };
+
   const photoColumns = [
+    { 
+      title: '预览', 
+      dataIndex: 'file_path', 
+      key: 'preview', 
+      width: 100,
+      render: (path) => (
+        path ? (
+          <Image
+            width={60}
+            height={40}
+            src={path}
+            style={{ objectFit: 'cover', borderRadius: 4 }}
+          />
+        ) : '-'
+      )
+    },
     { title: '照片类型', dataIndex: 'photo_type', key: 'photo_type', 
       render: (type) => photoTypes.find(p => p.value === type)?.label || type },
     { title: '损失部位', dataIndex: 'damage_part', key: 'damage_part' },
     { title: '文件名', dataIndex: 'file_name', key: 'file_name' },
+    { title: '文件大小', dataIndex: 'file_size', key: 'file_size',
+      render: (size) => size ? `${(size / 1024).toFixed(1)} KB` : '-' },
     { title: '上传人', dataIndex: 'upload_by', key: 'upload_by' },
     { title: '上传时间', dataIndex: 'upload_time', key: 'upload_time',
       render: (t) => dayjs(t).format('YYYY-MM-DD HH:mm') },
@@ -227,15 +274,35 @@ function Survey() {
       <Modal
         title="上传查勘照片"
         open={photoModalVisible}
-        onCancel={() => setPhotoModalVisible(false)}
+        onCancel={() => {
+          setPhotoModalVisible(false);
+          setFileList([]);
+        }}
         footer={null}
         destroyOnClose
+        width={500}
       >
-        <Form form={photoForm} layout="vertical" onFinish={handleAddPhoto}>
+        <Form form={photoForm} layout="vertical" onFinish={handleUploadPhoto}>
+          <Form.Item
+            name="photo"
+            label="选择照片"
+            rules={[{ required: true, message: '请选择照片文件' }]}
+          >
+            <Upload
+              beforeUpload={beforeUpload}
+              fileList={fileList}
+              onRemove={() => setFileList([])}
+              accept="image/*"
+              listType="picture"
+            >
+              <Button icon={<UploadOutlined />}>选择图片（JPG/PNG/GIF，最大10MB）</Button>
+            </Upload>
+          </Form.Item>
           <Form.Item
             name="photo_type"
             label="照片类型"
             rules={[{ required: true, message: '请选择照片类型' }]}
+            initialValue="scene"
           >
             <Select placeholder="请选择">
               {photoTypes.map(p => (
@@ -248,26 +315,24 @@ function Survey() {
             label="损失部位"
             rules={[{ required: true, message: '请选择损失部位' }]}
           >
-            <Select placeholder="请选择">
+            <Select placeholder="请选择" showSearch filterOption={(input, option) =>
+              option.children.toLowerCase().indexOf(input.toLowerCase()) >= 0
+            }>
               {damageParts.map(p => (
                 <Option key={p} value={p}>{p}</Option>
               ))}
             </Select>
           </Form.Item>
-          <Form.Item
-            name="file_name"
-            label="文件名"
-            rules={[{ required: true, message: '请输入文件名' }]}
-          >
-            <Input placeholder="例如：现场照片1.jpg" />
-          </Form.Item>
           <Form.Item name="description" label="照片描述">
-            <TextArea rows={3} placeholder="请输入照片描述" />
+            <TextArea rows={3} placeholder="请输入照片描述（可选）" />
           </Form.Item>
           <Form.Item>
             <Space>
-              <Button type="primary" htmlType="submit">确定上传</Button>
-              <Button onClick={() => setPhotoModalVisible(false)}>取消</Button>
+              <Button type="primary" htmlType="submit" loading={uploading}>确定上传</Button>
+              <Button onClick={() => {
+                setPhotoModalVisible(false);
+                setFileList([]);
+              }}>取消</Button>
             </Space>
           </Form.Item>
         </Form>

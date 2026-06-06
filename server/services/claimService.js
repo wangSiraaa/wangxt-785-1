@@ -182,29 +182,31 @@ function submitSurvey(reportId, operator) {
 
 function validateDamageItems(reportId, items, isReSubmit = false) {
   const report = db.prepare('SELECT status FROM report WHERE id = ?').get(reportId);
-  if (!report) throw new Error('案件不存在');
+  if (!report) throw new Error('案件不存在，请刷新页面后重试');
   
   const validStatuses = [STATUS.PENDING_ASSESS, STATUS.ASSESSING, STATUS.REVIEW_REJECTED];
   if (!validStatuses.includes(report.status)) {
-    throw new Error('当前状态不允许定损');
+    const statusName = STATUS_NAMES[report.status] || report.status;
+    throw new Error(`当前案件状态为【${statusName}】，不允许进行定损操作，请先完成查勘流程`);
   }
   
   if (isReSubmit) {
     const hasAdjustmentNote = items.every(item => item.adjustment_note && item.adjustment_note.trim().length > 0);
     if (!hasAdjustmentNote) {
-      throw new Error('复核退回后再次提交，所有损失项目必须填写调整说明');
+      throw new Error('复核退回后再次提交定损，所有损失项目必须填写【调整说明】，请补充后再提交');
     }
   }
   
   const parts = items.map(item => item.damage_part);
   const uniqueParts = [...new Set(parts)];
   if (parts.length !== uniqueParts.length) {
-    throw new Error('同一损失部位不能重复计价');
+    const duplicates = parts.filter((part, index) => parts.indexOf(part) !== index);
+    throw new Error(`同一损失部位不能重复计价，重复的部位有：${[...new Set(duplicates)].join('、')}`);
   }
   
   const photos = db.prepare('SELECT COUNT(*) as count FROM photo WHERE report_id = ?').get(reportId);
   if (photos.count === 0) {
-    throw new Error('缺少现场照片，无法提交定损');
+    throw new Error('缺少现场查勘照片，请先上传至少一张现场照片后再进行定损');
   }
   
   return true;
@@ -337,6 +339,51 @@ function getStatusList() {
   return Object.entries(STATUS_NAMES).map(([code, name]) => ({ code, name }));
 }
 
+function savePayoutSuggestion(reportId, suggestion, amount, operator) {
+  const report = db.prepare('SELECT status FROM report WHERE id = ?').get(reportId);
+  if (!report) throw new Error('案件不存在');
+  
+  const validStatuses = [STATUS.PENDING_PAY, STATUS.REVIEWING, STATUS.ASSESSING];
+  if (!validStatuses.includes(report.status)) {
+    throw new Error('当前状态不允许保存赔付建议');
+  }
+  
+  if (!suggestion || !suggestion.trim()) {
+    throw new Error('赔付建议不能为空');
+  }
+  
+  if (amount === undefined || amount === null || amount < 0) {
+    throw new Error('请输入有效的赔付金额');
+  }
+  
+  db.prepare(`
+    UPDATE report 
+    SET payout_suggestion = ?, payout_amount = ?, payout_operator = ?, payout_time = ?, updated_at = ?
+    WHERE id = ?
+  `).run(suggestion.trim(), amount, operator, dayjs().format(), dayjs().format(), reportId);
+  
+  addStatusHistory(reportId, report.status, report.status, operator, `保存赔付建议：${suggestion.trim()}，金额：${amount}元`);
+  
+  return getReportById(reportId);
+}
+
+function completeReport(reportId, operator) {
+  const report = getReportById(reportId);
+  if (!report) throw new Error('案件不存在');
+  
+  if (report.status !== STATUS.PENDING_PAY) {
+    throw new Error('只有待赔付状态的案件可以结案');
+  }
+  
+  if (!report.payout_suggestion || !report.payout_amount) {
+    throw new Error('请先保存赔付建议后再结案');
+  }
+  
+  updateReportStatus(reportId, STATUS.COMPLETED, operator, '案件已结案，赔付完成');
+  
+  return getReportById(reportId);
+}
+
 module.exports = {
   STATUS,
   STATUS_NAMES,
@@ -351,6 +398,8 @@ module.exports = {
   getReviewQueue,
   startReview,
   processReview,
+  savePayoutSuggestion,
+  completeReport,
   getThresholdConfig,
   getStatusList
 };

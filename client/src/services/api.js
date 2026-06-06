@@ -22,7 +22,13 @@ export const claimApi = {
   getReports: (params) => api.get('/reports', { params }),
   getReportById: (id) => api.get(`/reports/${id}`),
   
-  uploadPhoto: (reportId, data) => api.post(`/reports/${reportId}/photos`, data),
+  uploadPhoto: (reportId, formData) => {
+    return api.post(`/reports/${reportId}/photos`, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      }
+    });
+  },
   getPhotos: (reportId) => api.get(`/reports/${reportId}/photos`),
   submitSurvey: (reportId, operator) => api.post(`/reports/${reportId}/submit-survey`, { operator }),
   
@@ -33,6 +39,11 @@ export const claimApi = {
   startReview: (reportId, reviewer) => api.post(`/reports/${reportId}/start-review`, { reviewer }),
   processReview: (reportId, reviewer, result, opinion) => 
     api.post(`/reports/${reportId}/process-review`, { reviewer, result, opinion }),
+  
+  savePayoutSuggestion: (reportId, suggestion, amount, operator) =>
+    api.post(`/reports/${reportId}/payout-suggestion`, { suggestion, amount, operator }),
+  completeReport: (reportId, operator) =>
+    api.post(`/reports/${reportId}/complete`, { operator }),
   
   getThresholds: () => api.get('/thresholds'),
   getStatusList: () => api.get('/status-list')

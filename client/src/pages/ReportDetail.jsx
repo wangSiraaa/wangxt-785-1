@@ -2,11 +2,13 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Card, Descriptions, Tag, Button, Space, Typography, Timeline,
-  Table, message, Tabs, Statistic, Row, Col, Alert
+  Table, message, Tabs, Statistic, Row, Col, Alert, Modal, Form,
+  Input, InputNumber
 } from 'antd';
 import {
   ArrowLeftOutlined, EditOutlined, CameraOutlined,
-  ToolOutlined, AuditOutlined, ClockCircleOutlined
+  ToolOutlined, AuditOutlined, ClockCircleOutlined,
+  DollarOutlined, CheckOutlined
 } from '@ant-design/icons';
 import { claimApi } from '../services/api';
 import dayjs from 'dayjs';
@@ -32,6 +34,10 @@ function ReportDetail() {
   const navigate = useNavigate();
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [payoutModalVisible, setPayoutModalVisible] = useState(false);
+  const [payoutForm] = Form.useForm();
+  const [payoutLoading, setPayoutLoading] = useState(false);
+  const [completeLoading, setCompleteLoading] = useState(false);
 
   useEffect(() => {
     loadReportDetail();
@@ -47,6 +53,42 @@ function ReportDetail() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleSavePayout = async (values) => {
+    setPayoutLoading(true);
+    try {
+      await claimApi.savePayoutSuggestion(id, values.suggestion, values.amount, '理赔员');
+      message.success('赔付建议保存成功');
+      setPayoutModalVisible(false);
+      payoutForm.resetFields();
+      loadReportDetail();
+    } catch (error) {
+      message.error('保存赔付建议失败: ' + error.message);
+    } finally {
+      setPayoutLoading(false);
+    }
+  };
+
+  const handleComplete = async () => {
+    Modal.confirm({
+      title: '确认结案',
+      content: '确认该案件已赔付完成，要结案吗？',
+      okText: '确认结案',
+      cancelText: '取消',
+      onOk: async () => {
+        setCompleteLoading(true);
+        try {
+          await claimApi.completeReport(id, '理赔员');
+          message.success('案件已结案');
+          loadReportDetail();
+        } catch (error) {
+          message.error('结案失败: ' + error.message);
+        } finally {
+          setCompleteLoading(false);
+        }
+      }
+    });
   };
 
   const photoColumns = [
@@ -146,6 +188,15 @@ function ReportDetail() {
               <Statistic title="定损总金额" value={report.total_amount} precision={2} suffix="元" />
             </Col>
             <Col span={6}>
+              <Statistic 
+                title="赔付建议金额" 
+                value={report.payout_amount || 0} 
+                precision={2} 
+                suffix="元"
+                valueStyle={{ color: report.payout_amount ? '#3f8600' : '#999' }}
+              />
+            </Col>
+            <Col span={6}>
               <Statistic title="照片数量" value={report.photos.length} suffix="张" />
             </Col>
             <Col span={6}>
@@ -187,6 +238,30 @@ function ReportDetail() {
                   onClick={() => navigate('/review')}
                 >
                   去复核
+                </Button>
+              )}
+              {['pending_pay', 'assessing', 'reviewing'].includes(report.status) && (
+                <Button
+                  icon={<DollarOutlined />}
+                  onClick={() => {
+                    payoutForm.setFieldsValue({
+                      suggestion: report.payout_suggestion || '',
+                      amount: report.payout_amount || report.total_amount
+                    });
+                    setPayoutModalVisible(true);
+                  }}
+                >
+                  赔付建议
+                </Button>
+              )}
+              {report.status === 'pending_pay' && (
+                <Button
+                  type="primary"
+                  icon={<CheckOutlined />}
+                  loading={completeLoading}
+                  onClick={handleComplete}
+                >
+                  结案
                 </Button>
               )}
             </Space>
@@ -269,9 +344,95 @@ function ReportDetail() {
                 />
               )}
             </TabPane>
+
+            <TabPane tab={<span><DollarOutlined />赔付建议</span>} key="payout">
+              {!report.payout_suggestion ? (
+                <Alert
+                  message="暂无赔付建议"
+                  description={
+                    report.status === 'pending_pay' || report.status === 'reviewing' || report.status === 'assessing'
+                      ? '点击上方"赔付建议"按钮录入赔付建议'
+                      : '案件需进入定损或复核状态后可录入赔付建议'
+                  }
+                  type="info"
+                  showIcon
+                />
+              ) : (
+                <Descriptions column={1} bordered size="small">
+                  <Descriptions.Item label="赔付建议">
+                    {report.payout_suggestion}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="赔付金额">
+                    <span style={{ fontSize: 18, fontWeight: 'bold', color: '#3f8600' }}>
+                      ¥ {report.payout_amount.toFixed(2)}
+                    </span>
+                  </Descriptions.Item>
+                  <Descriptions.Item label="操作人">{report.payout_operator || '-'}</Descriptions.Item>
+                  <Descriptions.Item label="操作时间">
+                    {report.payout_time ? dayjs(report.payout_time).format('YYYY-MM-DD HH:mm') : '-'}
+                  </Descriptions.Item>
+                </Descriptions>
+              )}
+            </TabPane>
           </Tabs>
         </Card>
       </Space>
+
+      <Modal
+        title="录入赔付建议"
+        open={payoutModalVisible}
+        onCancel={() => {
+          setPayoutModalVisible(false);
+          payoutForm.resetFields();
+        }}
+        footer={null}
+        destroyOnClose
+        width={500}
+      >
+        <Form form={payoutForm} layout="vertical" onFinish={handleSavePayout}>
+          <Form.Item
+            name="amount"
+            label="赔付金额（元）"
+            rules={[
+              { required: true, message: '请输入赔付金额' },
+              { type: 'number', min: 0, message: '赔付金额不能小于0' }
+            ]}
+          >
+            <InputNumber
+              style={{ width: '100%' }}
+              placeholder="请输入赔付金额"
+              min={0}
+              precision={2}
+              addonBefore="¥"
+            />
+          </Form.Item>
+          <Form.Item
+            name="suggestion"
+            label="赔付建议说明"
+            rules={[{ required: true, message: '请输入赔付建议说明' }]}
+          >
+            <Input.TextArea
+              rows={4}
+              placeholder="请详细说明赔付建议的理由和依据"
+              showCount
+              maxLength={500}
+            />
+          </Form.Item>
+          <Form.Item>
+            <Space>
+              <Button type="primary" htmlType="submit" loading={payoutLoading}>
+                保存赔付建议
+              </Button>
+              <Button onClick={() => {
+                setPayoutModalVisible(false);
+                payoutForm.resetFields();
+              }}>
+                取消
+              </Button>
+            </Space>
+          </Form.Item>
+        </Form>
+      </Modal>
     </div>
   );
 }

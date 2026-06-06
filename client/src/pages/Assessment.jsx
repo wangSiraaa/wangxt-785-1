@@ -2,15 +2,22 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Card, Table, Button, Form, Input, InputNumber, Select, Tag,
-  Typography, message, Space, Modal, Descriptions, Alert, Statistic, Row, Col
+  Typography, message, Space, Modal, Descriptions, Alert, Statistic, Row, Col, Image
 } from 'antd';
-import { PlusOutlined, CheckOutlined, DeleteOutlined, WarningOutlined } from '@ant-design/icons';
+import { PlusOutlined, CheckOutlined, DeleteOutlined, WarningOutlined, ExclamationCircleOutlined } from '@ant-design/icons';
 import { claimApi } from '../services/api';
 import dayjs from 'dayjs';
 
 const { Title } = Typography;
 const { Option } = Select;
 const { TextArea } = Input;
+
+const photoTypes = [
+  { value: 'scene', label: '现场照片' },
+  { value: 'damage', label: '损失部位照片' },
+  { value: 'vehicle', label: '车辆全景照片' },
+  { value: 'other', label: '其他照片' }
+];
 
 const damageParts = [
   '前保险杠', '后保险杠', '左前大灯', '右前大灯', '左后视镜', '右后视镜',
@@ -136,6 +143,15 @@ function Assessment() {
   };
 
   const handleSubmitAssessment = async () => {
+    if (report?.photos.length === 0) {
+      message.error({
+        content: '请先上传现场照片后再提交定损',
+        icon: <ExclamationCircleOutlined style={{ color: '#ff4d4f' }} />,
+        duration: 3
+      });
+      return;
+    }
+
     if (damageItems.length === 0) {
       message.error('请先录入损失项目');
       return;
@@ -157,12 +173,24 @@ function Assessment() {
       if (result.status === 'pending_review') {
         message.warning(`定损总金额 ${result.total_amount.toFixed(2)} 元超过权限 ${threshold} 元，已进入复核队列`);
         navigate('/review');
+      } else if (result.status === 'pending_pay') {
+        message.success('定损提交成功，已进入赔付建议环节');
+        navigate(`/report/${selectedReportId}`);
       } else {
         message.success('定损提交成功');
         navigate('/');
       }
     } catch (error) {
-      message.error('提交失败: ' + error.message);
+      const errorMsg = error.message || '提交失败';
+      if (errorMsg.includes('照片') || errorMsg.includes('photo')) {
+        message.error({
+          content: errorMsg,
+          icon: <ExclamationCircleOutlined style={{ color: '#ff4d4f' }} />,
+          duration: 3
+        });
+      } else {
+        message.error('提交失败: ' + errorMsg);
+      }
     } finally {
       setSubmitLoading(false);
     }
@@ -257,29 +285,68 @@ function Assessment() {
                 type="error"
                 showIcon
                 icon={<WarningOutlined />}
+                style={{ marginTop: 12 }}
               />
             )}
           </Card>
 
           <Card title="已上传查勘照片" size="small">
-            <div className="photo-grid">
+            {report.photos.length === 0 && (
+              <Alert
+                message="尚未上传查勘照片，请先返回查勘页面上传现场照片后再进行定损"
+                type="error"
+                showIcon
+                icon={<ExclamationCircleOutlined />}
+                style={{ marginBottom: 16 }}
+                action={
+                  <Button size="small" type="primary" onClick={() => navigate(`/survey/${report.id}`)}>
+                    去上传照片
+                  </Button>
+                }
+              />
+            )}
+            <Row gutter={[16, 16]}>
               {report.photos.map(photo => (
-                <div key={photo.id} className="photo-item">
-                  <div className="photo-placeholder">
-                    {photo.damage_part}
-                  </div>
-                  <div className="photo-info">
-                    <div><strong>{photo.damage_part}</strong></div>
-                    <div style={{ color: '#999' }}>
-                      {photoTypes.find(p => p.value === photo.photo_type)?.label}
-                    </div>
-                  </div>
-                </div>
+                <Col span={6} key={photo.id}>
+                  <Card
+                    size="small"
+                    cover={
+                      photo.file_path ? (
+                        <Image
+                          alt={photo.damage_part}
+                          src={photo.file_path}
+                          height={120}
+                          style={{ objectFit: 'cover' }}
+                        />
+                      ) : (
+                        <div style={{ 
+                          height: 120, 
+                          backgroundColor: '#f0f0f0', 
+                          display: 'flex', 
+                          alignItems: 'center', 
+                          justifyContent: 'center',
+                          color: '#999'
+                        }}>
+                          {photo.damage_part}
+                        </div>
+                      )
+                    }
+                  >
+                    <Card.Meta
+                      title={photo.damage_part}
+                      description={
+                        <>
+                          <div>{photoTypes.find(p => p.value === photo.photo_type)?.label}</div>
+                          <div style={{ fontSize: 12, color: '#999' }}>
+                            {photo.upload_by} {dayjs(photo.upload_time).format('MM-DD HH:mm')}
+                          </div>
+                        </>
+                      }
+                    />
+                  </Card>
+                </Col>
               ))}
-              {report.photos.length === 0 && (
-                <Alert message="暂无查勘照片" type="warning" />
-              )}
-            </div>
+            </Row>
           </Card>
 
           <Card
@@ -353,61 +420,89 @@ function Assessment() {
         onCancel={() => setItemModalVisible(false)}
         footer={null}
         destroyOnClose
-        width={600}
+        width={500}
       >
         <Form form={itemForm} layout="vertical" onFinish={handleAddItem}>
-          <Row gutter={16}>
-            <Col span={12}>
-              <Form.Item name="damage_part" label="损失部位"
-                rules={[{ required: true, message: '请选择损失部位' }]}>
-                <Select placeholder="请选择">
-                  {damageParts.map(p => <Option key={p} value={p}>{p}</Option>)}
-                </Select>
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item name="damage_type" label="损失类型"
-                rules={[{ required: true, message: '请选择损失类型' }]}>
-                <Select placeholder="请选择">
-                  {damageTypes.map(t => <Option key={t.value} value={t.value}>{t.label}</Option>)}
-                </Select>
-              </Form.Item>
-            </Col>
-          </Row>
-          <Form.Item name="item_name" label="项目名称"
-            rules={[{ required: true, message: '请输入项目名称' }]}>
-            <Input placeholder="例如：前保险杠更换" />
+          <Form.Item
+            name="damage_part"
+            label="损失部位"
+            rules={[{ required: true, message: '请选择损失部位' }]}
+          >
+            <Select placeholder="请选择" showSearch filterOption={(input, option) =>
+              option.children.toLowerCase().indexOf(input.toLowerCase()) >= 0
+            }>
+              {damageParts.map(p => (
+                <Option key={p} value={p}>{p}</Option>
+              ))}
+            </Select>
           </Form.Item>
-          <Row gutter={16}>
+          <Form.Item
+            name="damage_type"
+            label="损失类型"
+            rules={[{ required: true, message: '请选择损失类型' }]}
+          >
+            <Select placeholder="请选择">
+              {damageTypes.map(t => (
+                <Option key={t.value} value={t.value}>{t.label}</Option>
+              ))}
+            </Select>
+          </Form.Item>
+          <Form.Item
+            name="item_name"
+            label="项目名称"
+            rules={[{ required: true, message: '请输入项目名称' }]}
+          >
+            <Input placeholder="例如：前保险杠修复" />
+          </Form.Item>
+          <Row gutter={12}>
             <Col span={8}>
-              <Form.Item name="quantity" label="数量"
+              <Form.Item
+                name="quantity"
+                label="数量"
                 rules={[{ required: true, message: '请输入数量' }]}
-                initialValue={1}>
+                initialValue={1}
+              >
                 <InputNumber min={1} style={{ width: '100%' }} />
               </Form.Item>
             </Col>
             <Col span={8}>
-              <Form.Item name="unit_price" label="单价(元)"
-                rules={[{ required: true, message: '请输入单价' }]}>
+              <Form.Item
+                name="unit_price"
+                label="单价(元)"
+                rules={[{ required: true, message: '请输入单价' }]}
+                initialValue={0}
+              >
                 <InputNumber min={0} precision={2} style={{ width: '100%' }} />
               </Form.Item>
             </Col>
             <Col span={8}>
-              <Form.Item name="labor_fee" label="工时费(元)" initialValue={0}>
+              <Form.Item
+                name="labor_fee"
+                label="工时费(元)"
+                initialValue={0}
+              >
                 <InputNumber min={0} precision={2} style={{ width: '100%' }} />
               </Form.Item>
             </Col>
           </Row>
-          <Form.Item name="parts_source" label="配件来源"
-            rules={[{ required: true, message: '请选择配件来源' }]}>
+          <Form.Item
+            name="parts_source"
+            label="配件来源"
+            rules={[{ required: true, message: '请选择配件来源' }]}
+          >
             <Select placeholder="请选择">
-              {partsSources.map(s => <Option key={s.value} value={s.value}>{s.label}</Option>)}
+              {partsSources.map(s => (
+                <Option key={s.value} value={s.value}>{s.label}</Option>
+              ))}
             </Select>
           </Form.Item>
           {isRejected && (
-            <Form.Item name="adjustment_note" label="调整说明"
-              rules={[{ required: true, message: '请填写调整说明' }]}>
-              <TextArea rows={3} placeholder="请说明本次调整的原因" />
+            <Form.Item
+              name="adjustment_note"
+              label="调整说明"
+              rules={[{ required: true, message: '复核退回后必须填写调整说明' }]}
+            >
+              <TextArea rows={2} placeholder="请说明本次调整的原因" />
             </Form.Item>
           )}
           <Form.Item>

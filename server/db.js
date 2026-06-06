@@ -34,6 +34,10 @@ async function initDatabase() {
       vehicle_brand TEXT NOT NULL,
       vehicle_model TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'pending_survey',
+      payout_suggestion TEXT,
+      payout_amount REAL,
+      payout_operator TEXT,
+      payout_time TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -47,9 +51,11 @@ async function initDatabase() {
       damage_part TEXT,
       file_name TEXT NOT NULL,
       file_path TEXT NOT NULL,
+      file_size INTEGER,
+      mime_type TEXT,
+      description TEXT,
       upload_by TEXT NOT NULL,
       upload_time TEXT NOT NULL,
-      description TEXT,
       FOREIGN KEY (report_id) REFERENCES report(id) ON DELETE CASCADE
     );
   `);
